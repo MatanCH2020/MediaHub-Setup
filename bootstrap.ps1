@@ -19,7 +19,7 @@ $ErrorActionPreference = 'Stop'
 # Printed in the banner. Bumped by hand on every change to this file, so a
 # screenshot always says which copy ran - raw.githubusercontent caches for
 # minutes and there is otherwise no way to tell a stale run from a current one.
-$BUILD      = '2026-08-17.2'
+$BUILD      = '2026-08-17.3'
 
 $OWNER      = 'MatanCH2020'
 $REPO       = 'MediaHub-Windows'
@@ -77,6 +77,40 @@ function Format-Key($raw) {
     return $raw.Trim().ToUpperInvariant()
 }
 
+
+# Characters people genuinely mix up when reading a key off a screen or hearing
+# it over the phone. The alphabet these keys were minted from excludes I, O, 0
+# and 1 but kept every one of these pairs, which was a mistake - MHW-5P9Q-3QZN-262G
+# contains all three.
+#
+# Rather than reissue every key, a rejected entry is retried with each plausible
+# substitution. The keyspace is 32^12, so a handful of extra candidates is not a
+# meaningful weakening; a wrong key is still a wrong key.
+$CONFUSABLE = @{
+    '2' = 'Z'; 'Z' = '2'
+    '5' = 'S'; 'S' = '5'
+    '6' = 'G'; 'G' = '6'
+    '8' = 'B'; 'B' = '8'
+}
+
+# Every combination of "leave it" / "swap it" across the ambiguous positions.
+# Capped so a pathological input cannot blow up into thousands of hashes.
+function Get-KeyVariants($key) {
+    $variants = New-Object System.Collections.Generic.List[string]
+    $variants.Add($key)
+    foreach ($i in 0..($key.Length - 1)) {
+        $c = $key[$i].ToString()
+        if (-not $CONFUSABLE.ContainsKey($c)) { continue }
+        $swapped = New-Object System.Collections.Generic.List[string]
+        foreach ($v in $variants) {
+            $alt = $v.Substring(0, $i) + $CONFUSABLE[$c] + $v.Substring($i + 1)
+            $swapped.Add($alt)
+        }
+        foreach ($s in $swapped) { if ($variants.Count -lt 128) { $variants.Add($s) } }
+    }
+    return $variants
+}
+
 function Get-KeyHash($key) {
     $sha   = [System.Security.Cryptography.SHA256]::Create()
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($key)
@@ -106,7 +140,16 @@ for ($attempt = 1; $attempt -le 3 -and -not $info; $attempt++) {
     if (-not $typed) { Line '    No key entered. Stopping.' 'Red'; return }
 
     $key   = Format-Key $typed
-    $entry = $allow.keys.PSObject.Properties | Where-Object { $_.Name -eq (Get-KeyHash $key) }
+    $entry = $null
+    $matched = $key
+    foreach ($candidate in (Get-KeyVariants $key)) {
+        $hit = $allow.keys.PSObject.Properties | Where-Object { $_.Name -eq (Get-KeyHash $candidate) }
+        if ($hit) { $entry = $hit; $matched = $candidate; break }
+    }
+    if ($entry -and $matched -ne $key) {
+        Line "    (read '$key' as '$matched' - 2/Z, 5/S and 6/G look alike)" 'DarkGray'
+        $key = $matched
+    }
 
     if ($entry) {
         $candidate = $entry.Value
