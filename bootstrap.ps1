@@ -19,7 +19,7 @@ $ErrorActionPreference = 'Stop'
 # Printed in the banner. Bumped by hand on every change to this file, so a
 # screenshot always says which copy ran - raw.githubusercontent caches for
 # minutes and there is otherwise no way to tell a stale run from a current one.
-$BUILD      = '2026-08-17.3'
+$BUILD      = '2026-08-17.4'
 
 $OWNER      = 'MatanCH2020'
 $REPO       = 'MediaHub-Windows'
@@ -218,7 +218,7 @@ if ($access.ExitCode -ne 0) {
     Line '    A key and a GitHub invitation are both required.' 'Yellow'
     Line ''
     Line '    Ask Matan to run:' 'DarkGray'
-    Line "      gh repo add-collaborator $OWNER/$REPO $who" 'DarkGray'
+    Line "      gh api --method PUT repos/$OWNER/$REPO/collaborators/$who -f permission=pull" 'DarkGray'
     Line ''
     if (Test-Path (Join-Path $INSTALL_TO '.git')) {
         Line "    Note: an earlier copy is still on this machine at" 'Yellow'
