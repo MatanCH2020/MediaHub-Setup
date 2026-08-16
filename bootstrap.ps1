@@ -24,6 +24,33 @@ $INSTALL_TO = Join-Path $env:LOCALAPPDATA 'MediaHub'
 function Line($text, $color = 'Gray') { Write-Host $text -ForegroundColor $color }
 function Step($n, $text) { Write-Host "`n[$n] $text" -ForegroundColor Cyan }
 
+# Runs an external program and returns its exit code, without letting its
+# stderr abort this script.
+#
+# PowerShell 5.1 wraps every stderr line from a native executable in an
+# ErrorRecord once that stream is redirected, and with
+# $ErrorActionPreference = 'Stop' that becomes a TERMINATING error even when
+# the program exited 0. `gh auth status` writes its normal "not logged in"
+# message to stderr, so it was killing this script at the exact line that
+# should have started the sign-in. Relaxing the preference around the call is
+# the only reliable fix - `2>$null` and `| Out-Null` do not prevent it.
+function Invoke-Native {
+    param([string]$Exe, [string[]]$Arguments)
+    $prev = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        $out = & $Exe @Arguments 2>&1
+        return [pscustomobject]@{
+            ExitCode = $LASTEXITCODE
+            Output   = ($out | Out-String)
+        }
+    } catch {
+        return [pscustomobject]@{ ExitCode = 1; Output = $_.Exception.Message }
+    } finally {
+        $ErrorActionPreference = $prev
+    }
+}
+
 Write-Host ''
 Write-Host '  MediaHub - setup' -ForegroundColor White
 Write-Host '  ------------------------' -ForegroundColor DarkGray
@@ -103,7 +130,8 @@ Step 2 'GitHub sign-in'
 $gh = (Get-Command gh.exe -ErrorAction SilentlyContinue).Source
 if (-not $gh) {
     Line '    Installing the GitHub CLI (one time)...' 'Gray'
-    winget install --id GitHub.cli --exact --silent --accept-package-agreements --accept-source-agreements | Out-Null
+    $null = Invoke-Native 'winget' @('install', '--id', 'GitHub.cli', '--exact', '--silent',
+                                     '--accept-package-agreements', '--accept-source-agreements')
     # winget updates PATH for new processes, not for this one.
     $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
                 [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -115,13 +143,17 @@ if (-not $gh) {
     }
 }
 
-& $gh auth status 2>&1 | Out-Null
-if ($LASTEXITCODE -ne 0) {
-    Line '    A browser window will open to sign in to GitHub.' 'Gray'
+$status = Invoke-Native $gh @('auth', 'status')
+if ($status.ExitCode -ne 0) {
+    Line '    Not signed in. A browser window will open.' 'Gray'
+    # NOT wrapped: this one is interactive and its output has to reach the
+    # console, including the one-time code the user has to type.
     & $gh auth login --hostname github.com --git-protocol https --web
-    if ($LASTEXITCODE -ne 0) { Line '    Sign-in did not complete. Stopping.' 'Red'; return }
+    $status = Invoke-Native $gh @('auth', 'status')
+    if ($status.ExitCode -ne 0) { Line '    Sign-in did not complete. Stopping.' 'Red'; return }
 }
-$who = (& $gh api user --jq '.login' 2>$null)
+
+$who = (Invoke-Native $gh @('api', 'user', '--jq', '.login')).Output.Trim()
 Line "    OK - signed in as $who" 'Green'
 
 # ---- 3. fetch ---------------------------------------------------------
@@ -130,16 +162,19 @@ Step 3 'Downloading MediaHub'
 if (Test-Path (Join-Path $INSTALL_TO '.git')) {
     Line "    Already present at $INSTALL_TO - updating instead." 'Gray'
     Push-Location $INSTALL_TO
-    & $gh repo sync 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) { & git pull --ff-only 2>&1 | Out-Null }
+    $sync = Invoke-Native $gh @('repo', 'sync')
+    if ($sync.ExitCode -ne 0) { $null = Invoke-Native 'git' @('pull', '--ff-only') }
     Pop-Location
 } else {
     New-Item -ItemType Directory -Force -Path (Split-Path $INSTALL_TO) | Out-Null
-    & $gh repo clone "$OWNER/$REPO" $INSTALL_TO 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0) {
+    $clone = Invoke-Native $gh @('repo', 'clone', "$OWNER/$REPO", $INSTALL_TO)
+    if ($clone.ExitCode -ne 0) {
         Line '    Could not download the repository.' 'Red'
-        Line "    The account $who has a valid key but no access to the code." 'Yellow'
-        Line '    Ask Matan to add you as a collaborator, then run this again.' 'Yellow'
+        Line "    The account '$who' has a valid key but no access to the code." 'Yellow'
+        Line '    Ask Matan to add that account as a collaborator, then run this again.' 'Yellow'
+        Line ''
+        Line '    Matan runs:' 'DarkGray'
+        Line "      gh repo add-collaborator $OWNER/$REPO $who" 'DarkGray'
         return
     }
 }
