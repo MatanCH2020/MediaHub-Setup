@@ -42,8 +42,13 @@ function Get-KeyHash($key) {
 $key = Read-Host '    Enter your key (MHW-XXXX-XXXX-XXXX)'
 if (-not $key) { Line '    No key entered. Stopping.' 'Red'; return }
 
+# Fetched as text and parsed here rather than with Invoke-RestMethod, so a
+# byte-order mark can be stripped first: ConvertFrom-Json rejects a leading
+# U+FEFF with "Invalid JSON primitive", and raw.githubusercontent can serve a
+# cached copy for a few minutes after the file itself has been fixed.
 try {
-    $allow = Invoke-RestMethod -Uri $ALLOW_URL -TimeoutSec 30
+    $body  = (Invoke-WebRequest -Uri $ALLOW_URL -TimeoutSec 30 -UseBasicParsing).Content
+    $allow = $body.TrimStart([char]0xFEFF) | ConvertFrom-Json
 } catch {
     Line "    Could not reach the key list: $($_.Exception.Message)" 'Red'
     Line '    Check the internet connection and try again.' 'Yellow'
