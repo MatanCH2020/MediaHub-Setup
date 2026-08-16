@@ -1,11 +1,16 @@
-{
-  "revision": 1,
-  "note": "SHA-256 hashes of issued activation keys. Hashes only - a hash cannot be turned back into a key, so this file is safe to publish. To revoke access, delete the entry and commit.",
-  "keys": {
-    "72cd4a470f0d2f5c086bd50a8e08f52de02bb7e3e6992b254d6b861761b9de03": {
-      "label": "Matan (owner)",
-      "issued": "2026-08-16",
-      "expires": null
-    }
-  }
+﻿{
+    "revision":  2,
+    "note":  "SHA-256 hashes of issued activation keys. Hashes only - a hash cannot be turned back into a key, so this file is safe to publish. To revoke access, delete the entry and commit.",
+    "keys":  {
+                 "72cd4a470f0d2f5c086bd50a8e08f52de02bb7e3e6992b254d6b861761b9de03":  {
+                                                                                          "label":  "Matan (owner)",
+                                                                                          "issued":  "2026-08-16",
+                                                                                          "expires":  null
+                                                                                      },
+                 "40c35c91d2a0fb1e202e442201f690788c744c4c7135b6aec0fa162fa3ce66aa":  {
+                                                                                          "label":  "ZZ-TEST-DELETE-ME",
+                                                                                          "issued":  "2026-08-16",
+                                                                                          "expires":  "2026-08-23"
+                                                                                      }
+             }
 }
