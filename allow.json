@@ -1,4 +1,4 @@
-﻿{
+{
     "revision":  3,
     "note":  "SHA-256 hashes of issued activation keys. Hashes only - a hash cannot be turned back into a key, so this file is safe to publish. To revoke access, delete the entry and commit.",
     "keys":  {
