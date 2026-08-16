@@ -11,10 +11,15 @@
 #  ASCII only, on purpose. This file is piped straight into iex from a web
 #  request, where the encoding of the response is out of our hands and a
 #  mangled non-ASCII character becomes a parse error with no useful message.
-#  The installer it hands off to is UTF-8 with a BOM and prints in Hebrew.
+#  The installer it hands off to is English and ASCII for the same reason.
 # ============================================================
 
 $ErrorActionPreference = 'Stop'
+
+# Printed in the banner. Bumped by hand on every change to this file, so a
+# screenshot always says which copy ran - raw.githubusercontent caches for
+# minutes and there is otherwise no way to tell a stale run from a current one.
+$BUILD      = '2026-08-17.2'
 
 $OWNER      = 'MatanCH2020'
 $REPO       = 'MediaHub-Windows'
@@ -52,8 +57,8 @@ function Invoke-Native {
 }
 
 Write-Host ''
-Write-Host '  MediaHub - setup' -ForegroundColor White
-Write-Host '  ------------------------' -ForegroundColor DarkGray
+Write-Host "  MediaHub - setup    (bootstrap $BUILD)" -ForegroundColor White
+Write-Host '  ----------------------------------------' -ForegroundColor DarkGray
 
 # ---- 1. activation key -----------------------------------------------
 # Checked here as well as in the running app: failing before anything is
@@ -156,36 +161,75 @@ if ($status.ExitCode -ne 0) {
 $who = (Invoke-Native $gh @('api', 'user', '--jq', '.login')).Output.Trim()
 Line "    OK - signed in as $who" 'Green'
 
-# ---- 3. fetch ---------------------------------------------------------
-Step 3 'Downloading MediaHub'
+# ---- 3. access ---------------------------------------------------------
+# Checked on its own, BEFORE looking at the disk. Deciding this by whether the
+# clone succeeded meant an existing folder skipped the check entirely: a
+# never-authorised account found the repo already there, took the "update"
+# path, had its silent sync fail, and was told OK. That is the access gate not
+# running at all, and it also left the copy on disk permanently stale.
+Step 3 'Checking access'
+
+$access = Invoke-Native $gh @('api', "repos/$OWNER/$REPO", '--jq', '.full_name')
+if ($access.ExitCode -ne 0) {
+    Line "    The account '$who' has a valid key but no access to the code." 'Red'
+    Line '    A key and a GitHub invitation are both required.' 'Yellow'
+    Line ''
+    Line '    Ask Matan to run:' 'DarkGray'
+    Line "      gh repo add-collaborator $OWNER/$REPO $who" 'DarkGray'
+    Line ''
+    if (Test-Path (Join-Path $INSTALL_TO '.git')) {
+        Line "    Note: an earlier copy is still on this machine at" 'Yellow'
+        Line "      $INSTALL_TO" 'DarkGray'
+        Line '    It cannot be updated without access, so it is left untouched.' 'Yellow'
+    }
+    return
+}
+Line "    OK - $who can reach $OWNER/$REPO" 'Green'
+
+# ---- 4. fetch ---------------------------------------------------------
+Step 4 'Downloading MediaHub'
 
 if (Test-Path (Join-Path $INSTALL_TO '.git')) {
-    Line "    Already present at $INSTALL_TO - updating instead." 'Gray'
+    Line "    Already present - updating." 'Gray'
     Push-Location $INSTALL_TO
-    $sync = Invoke-Native $gh @('repo', 'sync')
-    if ($sync.ExitCode -ne 0) { $null = Invoke-Native 'git' @('pull', '--ff-only') }
-    Pop-Location
+    try {
+        # Fetch and hard-reset rather than pull: a stale copy is worth less than
+        # a correct one, and a merge conflict here would leave a half-updated
+        # install that is harder to diagnose than a clean overwrite.
+        $fetch = Invoke-Native 'git' @('fetch', 'origin', 'main')
+        if ($fetch.ExitCode -ne 0) {
+            Line "    Could not fetch: $($fetch.Output.Trim())" 'Red'
+            Pop-Location
+            return
+        }
+        $null = Invoke-Native 'git' @('reset', '--hard', 'origin/main')
+        $head = (Invoke-Native 'git' @('rev-parse', '--short', 'HEAD')).Output.Trim()
+        Line "    OK - updated to $head" 'Green'
+    } finally { Pop-Location }
 } else {
     New-Item -ItemType Directory -Force -Path (Split-Path $INSTALL_TO) | Out-Null
     $clone = Invoke-Native $gh @('repo', 'clone', "$OWNER/$REPO", $INSTALL_TO)
     if ($clone.ExitCode -ne 0) {
         Line '    Could not download the repository.' 'Red'
-        Line "    The account '$who' has a valid key but no access to the code." 'Yellow'
-        Line '    Ask Matan to add that account as a collaborator, then run this again.' 'Yellow'
-        Line ''
-        Line '    Matan runs:' 'DarkGray'
-        Line "      gh repo add-collaborator $OWNER/$REPO $who" 'DarkGray'
+        Line "    $($clone.Output.Trim())" 'DarkGray'
         return
     }
+    Push-Location $INSTALL_TO
+    $head = (Invoke-Native 'git' @('rev-parse', '--short', 'HEAD')).Output.Trim()
+    Pop-Location
+    Line "    OK - $INSTALL_TO ($head)" 'Green'
 }
-Line "    OK - $INSTALL_TO" 'Green'
 
-# ---- 4. hand off ------------------------------------------------------
-Step 4 'Starting the installer'
+# ---- 5. hand off ------------------------------------------------------
+Step 5 'Starting the installer'
 
 # The key is passed through so the installer does not ask a second time, and
 # so it can record which key this machine was activated with.
 $installer = Join-Path $INSTALL_TO 'install.ps1'
 if (-not (Test-Path $installer)) { Line "    Missing: $installer" 'Red'; return }
+
+Line '    The installer needs administrator rights and opens in a new window.' 'Gray'
+Line '    Approve the prompt, then follow it there - this window is done.' 'Gray'
+Line ''
 
 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -Key $key
