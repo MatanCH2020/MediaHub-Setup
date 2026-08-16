@@ -19,7 +19,7 @@ $ErrorActionPreference = 'Stop'
 # Printed in the banner. Bumped by hand on every change to this file, so a
 # screenshot always says which copy ran - raw.githubusercontent caches for
 # minutes and there is otherwise no way to tell a stale run from a current one.
-$BUILD      = '2026-08-17.4'
+$BUILD      = '2026-08-17.5'
 
 $OWNER      = 'MatanCH2020'
 $REPO       = 'MediaHub-Windows'
@@ -213,12 +213,44 @@ Line "    OK - signed in as $who" 'Green'
 Step 3 'Checking access'
 
 $access = Invoke-Native $gh @('api', "repos/$OWNER/$REPO", '--jq', '.full_name')
+
+# Adding a collaborator creates an INVITATION, not access - GitHub requires the
+# invitee to accept it. Until then the repo reads as completely inaccessible,
+# which is indistinguishable from never having been invited even though the fix
+# is entirely different. So a pending invitation is looked for and accepted
+# here, rather than sending the user to a web page to click a button.
+if ($access.ExitCode -ne 0) {
+    # Filtered in PowerShell rather than with --jq. A jq expression containing
+    # double quotes does not survive PowerShell's native-argument parsing: the
+    # quotes are stripped and jq reads "MediaHub-Windows" as an expression,
+    # failing with "function not defined: Windows/0".
+    $inviteId = $null
+    $pending = Invoke-Native $gh @('api', '/user/repository_invitations')
+    if ($pending.ExitCode -eq 0) {
+        try {
+            $invites = $pending.Output | ConvertFrom-Json
+            $mine = @($invites | Where-Object { $_.repository.full_name -eq "$OWNER/$REPO" })
+            if ($mine.Count) { $inviteId = $mine[0].id }
+        } catch { }
+    }
+    if ($inviteId) {
+        Line "    Found a pending invitation - accepting it." 'Gray'
+        $accept = Invoke-Native $gh @('api', '--method', 'PATCH', "/user/repository_invitations/$inviteId")
+        if ($accept.ExitCode -eq 0) {
+            $access = Invoke-Native $gh @('api', "repos/$OWNER/$REPO", '--jq', '.full_name')
+        } else {
+            Line "    Could not accept it: $($accept.Output.Trim())" 'Yellow'
+        }
+    }
+}
+
 if ($access.ExitCode -ne 0) {
     Line "    The account '$who' has a valid key but no access to the code." 'Red'
     Line '    A key and a GitHub invitation are both required.' 'Yellow'
     Line ''
     Line '    Ask Matan to run:' 'DarkGray'
     Line "      gh api --method PUT repos/$OWNER/$REPO/collaborators/$who -f permission=pull" 'DarkGray'
+    Line '    then run this again - the invitation is accepted automatically.' 'DarkGray'
     Line ''
     if (Test-Path (Join-Path $INSTALL_TO '.git')) {
         Line "    Note: an earlier copy is still on this machine at" 'Yellow'
