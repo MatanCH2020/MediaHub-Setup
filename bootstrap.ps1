@@ -25,13 +25,13 @@ function Line($text, $color = 'Gray') { Write-Host $text -ForegroundColor $color
 function Step($n, $text) { Write-Host "`n[$n] $text" -ForegroundColor Cyan }
 
 Write-Host ''
-Write-Host '  MediaHub - setup / התקנה' -ForegroundColor White
+Write-Host '  MediaHub - setup' -ForegroundColor White
 Write-Host '  ------------------------' -ForegroundColor DarkGray
 
 # ---- 1. activation key -----------------------------------------------
 # Checked here as well as in the running app: failing before anything is
 # downloaded or installed is a much better experience than failing after.
-Step 1 'Activation key / מפתח הפעלה'
+Step 1 'Activation key'
 
 function Get-KeyHash($key) {
     $sha   = [System.Security.Cryptography.SHA256]::Create()
