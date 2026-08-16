@@ -33,14 +33,23 @@ Write-Host '  ------------------------' -ForegroundColor DarkGray
 # downloaded or installed is a much better experience than failing after.
 Step 1 'Activation key'
 
-function Get-KeyHash($key) {
-    $sha   = [System.Security.Cryptography.SHA256]::Create()
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($key.Trim().ToUpperInvariant())
-    return (-join ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') }))
+# Accepts what people actually type: lower case, missing or wrong dashes,
+# stray spaces, a trailing paste artefact. Everything that is not a letter or
+# digit is dropped and the canonical dashes are put back, so MHW5p9q3qzn262g
+# and "mhw-5p9q 3qzn-262g" both resolve to the same key.
+function Format-Key($raw) {
+    $clean = ($raw -replace '[^A-Za-z0-9]', '').ToUpperInvariant()
+    if ($clean.Length -eq 15 -and $clean.StartsWith('MHW')) {
+        return 'MHW-' + $clean.Substring(3, 4) + '-' + $clean.Substring(7, 4) + '-' + $clean.Substring(11, 4)
+    }
+    return $raw.Trim().ToUpperInvariant()
 }
 
-$key = Read-Host '    Enter your key (MHW-XXXX-XXXX-XXXX)'
-if (-not $key) { Line '    No key entered. Stopping.' 'Red'; return }
+function Get-KeyHash($key) {
+    $sha   = [System.Security.Cryptography.SHA256]::Create()
+    $bytes = [System.Text.Encoding]::UTF8.GetBytes($key)
+    return (-join ($sha.ComputeHash($bytes) | ForEach-Object { $_.ToString('x2') }))
+}
 
 # Fetched as text and parsed here rather than with Invoke-RestMethod, so a
 # byte-order mark can be stripped first: ConvertFrom-Json rejects a leading
@@ -55,19 +64,34 @@ try {
     return
 }
 
-$hash  = Get-KeyHash $key
-$entry = $allow.keys.PSObject.Properties | Where-Object { $_.Name -eq $hash }
+# Three attempts before giving up. A single mistyped character used to end the
+# whole run and force the one-liner to be pasted again - a bad first minute for
+# something whose very first step is copying a 16-character code by hand.
+$info = $null
+$key  = $null
+for ($attempt = 1; $attempt -le 3 -and -not $info; $attempt++) {
+    $typed = Read-Host '    Enter your key (MHW-XXXX-XXXX-XXXX)'
+    if (-not $typed) { Line '    No key entered. Stopping.' 'Red'; return }
 
-if (-not $entry) {
-    Line '    That key is not recognised.' 'Red'
-    Line '    Ask Matan for a key, or check for a typo.' 'Yellow'
-    return
+    $key   = Format-Key $typed
+    $entry = $allow.keys.PSObject.Properties | Where-Object { $_.Name -eq (Get-KeyHash $key) }
+
+    if ($entry) {
+        $candidate = $entry.Value
+        if ($candidate.expires -and ([datetime]$candidate.expires) -lt (Get-Date)) {
+            Line "    That key expired on $($candidate.expires). Ask Matan for a new one." 'Red'
+            return
+        }
+        $info = $candidate
+    } elseif ($attempt -lt 3) {
+        Line "    Not recognised - check for a typo. Attempt $attempt of 3." 'Yellow'
+        Line "    (read as: $key)" 'DarkGray'
+    } else {
+        Line '    That key is not recognised. Ask Matan for a key.' 'Red'
+        return
+    }
 }
-$info = $entry.Value
-if ($info.expires -and ([datetime]$info.expires) -lt (Get-Date)) {
-    Line "    That key expired on $($info.expires)." 'Red'
-    return
-}
+
 Line "    OK - key accepted ($($info.label))" 'Green'
 
 # ---- 2. GitHub CLI ----------------------------------------------------
