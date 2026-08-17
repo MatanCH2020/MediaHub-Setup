@@ -23,7 +23,7 @@ $ErrorActionPreference = 'Stop'
 # Printed in the banner. Bumped by hand on every change to this file, so a
 # screenshot always says which copy ran - raw.githubusercontent caches for
 # minutes and there is otherwise no way to tell a stale run from a current one.
-$BUILD      = '2026-08-17.9'
+$BUILD      = '2026-08-17.10'
 
 $OWNER      = 'MatanCH2020'
 $REPO       = 'MediaHub-Windows'
@@ -95,7 +95,17 @@ if ($status.ExitCode -ne 0) {
     if ($status.ExitCode -ne 0) { Line '    Sign-in did not complete. Stopping.' 'Red'; return }
 }
 
-$who = (Invoke-Native $gh @('api', 'user', '--jq', '.login')).Output.Trim()
+$whoResult = Invoke-Native $gh @('api', 'user', '--jq', '.login')
+$who = $whoResult.Output.Trim()
+# GitHub answers 503 often enough to matter, and the exit code was not being
+# checked - so an outage printed the error JSON as if it were a username and
+# the run carried on into a clone that could not work.
+if ($whoResult.ExitCode -ne 0 -or -not $who -or $who -match '[{}"]') {
+    Line '    GitHub did not answer. This is usually a temporary outage.' 'Red'
+    Line "    $($who -replace '\s+', ' ')" 'DarkGray'
+    Line '    Wait a minute and run this again.' 'Yellow'
+    return
+}
 Line "    OK - signed in as $who" 'Green'
 
 # ---- 2. access ---------------------------------------------------------
@@ -151,6 +161,10 @@ if ($access.ExitCode -ne 0) {
         Line "      $INSTALL_TO" 'DarkGray'
         Line '    It cannot be updated without access, so it is left untouched.' 'Yellow'
     }
+    return
+}
+if ($access.Output -match '[{}"]' -or -not $access.Output.Trim()) {
+    Line '    GitHub did not answer properly. Wait a minute and run this again.' 'Red'
     return
 }
 Line "    OK - $who can reach $OWNER/$REPO" 'Green'
