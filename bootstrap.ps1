@@ -19,7 +19,7 @@ $ErrorActionPreference = 'Stop'
 # Printed in the banner. Bumped by hand on every change to this file, so a
 # screenshot always says which copy ran - raw.githubusercontent caches for
 # minutes and there is otherwise no way to tell a stale run from a current one.
-$BUILD      = '2026-08-17.6'
+$BUILD      = '2026-08-17.7'
 
 $OWNER      = 'MatanCH2020'
 $REPO       = 'MediaHub-Windows'
@@ -294,7 +294,34 @@ if (Test-Path (Join-Path $INSTALL_TO '.git')) {
             if (Test-Path $src) { $keep[$rel] = Get-Content $src -Raw -Encoding UTF8 }
         }
         if ($keep.Count) { Line "    Keeping your settings ($($keep.Keys -join ', '))." 'Gray' }
+
+        # The running dashboard has its working directory inside this folder,
+        # and Windows will not delete a directory a process is sitting in. The
+        # first attempt at this failed silently because -ErrorAction
+        # SilentlyContinue swallowed the error, so the clone then hit the same
+        # non-empty folder again with no explanation.
+        Get-ScheduledTask -TaskName 'MediaDashboard' -ErrorAction SilentlyContinue |
+            Unregister-ScheduledTask -Confirm:$false -ErrorAction SilentlyContinue
+        foreach ($prt in 8787..8810) {
+            foreach ($conn in @(Get-NetTCPConnection -LocalPort $prt -State Listen -ErrorAction SilentlyContinue)) {
+                $proc = Get-Process -Id $conn.OwningProcess -ErrorAction SilentlyContinue
+                if ($proc -and $proc.ProcessName -match '^(node|wscript)$') {
+                    Line "    Stopping the dashboard on port $prt." 'Gray'
+                    Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
+        Start-Sleep -Seconds 2
+
         Remove-Item $INSTALL_TO -Recurse -Force -ErrorAction SilentlyContinue
+        if (Test-Path $INSTALL_TO) {
+            # Reported rather than swallowed: a second identical failure with no
+            # reason is the worst possible outcome here.
+            Line '    Could not remove the old folder. Something still has a file open in it.' 'Red'
+            Line "      $INSTALL_TO" 'DarkGray'
+            Line '    Close any window or Explorer sitting in that folder and run this again.' 'Yellow'
+            return
+        }
     }
 
     New-Item -ItemType Directory -Force -Path (Split-Path $INSTALL_TO) | Out-Null
