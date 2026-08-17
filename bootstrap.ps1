@@ -19,7 +19,7 @@ $ErrorActionPreference = 'Stop'
 # Printed in the banner. Bumped by hand on every change to this file, so a
 # screenshot always says which copy ran - raw.githubusercontent caches for
 # minutes and there is otherwise no way to tell a stale run from a current one.
-$BUILD      = '2026-08-17.5'
+$BUILD      = '2026-08-17.6'
 
 $OWNER      = 'MatanCH2020'
 $REPO       = 'MediaHub-Windows'
@@ -282,12 +282,36 @@ if (Test-Path (Join-Path $INSTALL_TO '.git')) {
         Line "    OK - updated to $head" 'Green'
     } finally { Pop-Location }
 } else {
+    # The folder can exist without being a checkout - an interrupted install, a
+    # half-removed one, or the running dashboard recreating it to write state.
+    # git refuses to clone into a non-empty directory, so it is cleared first,
+    # keeping the two files that are the user's own and are not in git.
+    if (Test-Path $INSTALL_TO) {
+        Line '    Folder exists but is not a MediaHub checkout - replacing it.' 'Yellow'
+        $keep = @{}
+        foreach ($rel in @('.env', 'dashboard\config.json')) {
+            $src = Join-Path $INSTALL_TO $rel
+            if (Test-Path $src) { $keep[$rel] = Get-Content $src -Raw -Encoding UTF8 }
+        }
+        if ($keep.Count) { Line "    Keeping your settings ($($keep.Keys -join ', '))." 'Gray' }
+        Remove-Item $INSTALL_TO -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
     New-Item -ItemType Directory -Force -Path (Split-Path $INSTALL_TO) | Out-Null
     $clone = Invoke-Native $gh @('repo', 'clone', "$OWNER/$REPO", $INSTALL_TO)
     if ($clone.ExitCode -ne 0) {
         Line '    Could not download the repository.' 'Red'
         Line "    $($clone.Output.Trim())" 'DarkGray'
         return
+    }
+
+    if ($keep -and $keep.Count) {
+        foreach ($rel in $keep.Keys) {
+            $dest = Join-Path $INSTALL_TO $rel
+            New-Item -ItemType Directory -Force -Path (Split-Path $dest) | Out-Null
+            [System.IO.File]::WriteAllText($dest, $keep[$rel], (New-Object System.Text.UTF8Encoding($false)))
+        }
+        Line '    Settings restored.' 'Gray'
     }
     Push-Location $INSTALL_TO
     $head = (Invoke-Native 'git' @('rev-parse', '--short', 'HEAD')).Output.Trim()
