@@ -19,7 +19,7 @@ $ErrorActionPreference = 'Stop'
 # Printed in the banner. Bumped by hand on every change to this file, so a
 # screenshot always says which copy ran - raw.githubusercontent caches for
 # minutes and there is otherwise no way to tell a stale run from a current one.
-$BUILD      = '2026-08-17.7'
+$BUILD      = '2026-08-17.8'
 
 $OWNER      = 'MatanCH2020'
 $REPO       = 'MediaHub-Windows'
